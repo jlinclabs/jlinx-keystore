@@ -1,12 +1,8 @@
 
 const Debug = require('debug')
-
+const b64 = require('urlsafe-base64')
 const debug = Debug('jlinx:keystore')
 const {
-  sign,
-  encrypt,
-  keyToString,
-  keyToBuffer,
   createSigningKeyPair,
   createEncryptingKeyPair,
   validateSigningKeyPair,
@@ -31,59 +27,44 @@ module.exports = class Keystore {
   ready () { return this._map.ready() }
 
   async createSigning () {
-    const { publicKey, secretKey } = createSigningKeyPair()
-    const publicKeyAsString = keyToString(publicKey)
-    debug('created signing key', publicKeyAsString, publicKeyAsString.length)
-    debug('secretKey.byteLength', secretKey.byteLength)
-    await this._map.set(publicKeyAsString, secretKey)
-    return createSigningWrapper({ publicKeyAsString, publicKey, secretKey })
+    const keypair = createSigningKeyPair()
+    await this.set(keypair)
+    return keypair
   }
 
   async createEncrypting () {
-    const { publicKey, secretKey } = createEncryptingKeyPair()
-    const publicKeyAsString = keyToString(publicKey)
-    debug('created encrypting key', publicKeyAsString, publicKeyAsString.length)
-    debug('secretKey.byteLength', secretKey.byteLength)
-    await this._map.set(publicKeyAsString, secretKey)
-    return createEncryptingWrapper({ publicKeyAsString, publicKey, secretKey })
+    const keypair = createEncryptingKeyPair()
+    await this.set(keypair)
+    return keypair
   }
 
-  async get (publicKeyAsString) {
-    const secretKey = await this._map.get(publicKeyAsString)
-    if (!secretKey) return
-    debug('get', publicKeyAsString, secretKey.length)
-    const publicKey = keyToBuffer(publicKeyAsString)
-    if (secretKey.byteLength === 64) {
-      return createSigningWrapper({ publicKeyAsString, publicKey, secretKey })
-    }
-    if (secretKey.byteLength === 32) {
-      return createEncryptingWrapper({ publicKeyAsString, publicKey, secretKey })
-    }
+  put ({ publicKey, secretKey }) {
+    if (!validKeyPair({ publicKey, secretKey })) throw new Error('invalid key pair')
+    return this._map.set(b64.encode(publicKey), secretKey)
   }
 
-  has (publicKeyAsString) {
-    return this._map.has(publicKeyAsString)
+  get (publicKey) {
+    return this._map.get(b64.encode(publicKey))
   }
 
-  delete (publicKeyAsString) {
-    return this._map.delete(publicKeyAsString)
+  has (publicKey) {
+    return this._map.has(b64.encode(publicKey))
+  }
+
+  delete (publicKey) {
+    return this._map.delete(b64.encode(publicKey))
   }
 }
 
-function createSigningWrapper ({ publicKeyAsString, publicKey, secretKey }) {
-  return {
-    publicKey: publicKeyAsString,
-    valid: () => validateSigningKeyPair({ publicKey, secretKey }),
-    sign: signable => sign(signable, secretKey),
-    verify: signable => sign(signable, secretKey)
-  }
-}
-
-function createEncryptingWrapper ({ publicKeyAsString, publicKey, secretKey }) {
-  return {
-    publicKey: publicKeyAsString,
-    valid: () => validateEncryptingKeyPair({ publicKey, secretKey }),
-    encrypt: encryptable => encrypt(encryptable, secretKey),
-    decrypt: encryptable => encrypt(encryptable, secretKey)
-  }
+function validKeyPair ({ publicKey, secretKey }) {
+  if (!secretKey) return false
+  if (
+    secretKey.byteLength === 64 &&
+    validateSigningKeyPair({ publicKey, secretKey })
+  ) return true
+  if (
+    secretKey.byteLength === 32 &&
+    validateEncryptingKeyPair({ publicKey, secretKey })
+  ) return true
+  return false
 }

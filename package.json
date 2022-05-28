@@ -28,7 +28,8 @@
   "dependencies": {
     "b4a": "^1.5.3",
     "jlinx-util": "file:../util",
-    "safety-catch": "^1.0.2"
+    "safety-catch": "^1.0.2",
+    "urlsafe-base64": "^1.0.0"
   },
   "devDependencies": {
     "standard": "^17.0.0",
