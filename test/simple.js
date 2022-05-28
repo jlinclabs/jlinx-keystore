@@ -36,12 +36,16 @@ test('simple', async t => {
       )
     )
 
+    t.ok(await keys.delete(signatron.publicKey))
+    t.same(await keys.get(signatron.publicKey), undefined)
+
     const encryptatron = await keys.createEncrypting()
     t.same(encryptatron.publicKey.length, 43)
     t.same(typeof encryptatron.valid, 'function')
     t.same(typeof encryptatron.encrypt, 'function')
     t.same(typeof encryptatron.decrypt, 'function')
     t.ok(await encryptatron.valid())
+    // TODO get encrypt tested
     // t.same(
     //   b4a.from('messsage'),
     //   await encryptatron.decrypt(
