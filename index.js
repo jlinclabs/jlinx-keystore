@@ -1,66 +1,89 @@
-const Path = require('path')
-const fs = require('fs/promises')
-const safetyCatch = require('safety-catch')
+
 const Debug = require('debug')
 
 const debug = Debug('jlinx:keystore')
+const {
+  sign,
+  encrypt,
+  keyToString,
+  keyToBuffer,
+  createSigningKeyPair,
+  createEncryptingKeyPair,
+  validateSigningKeyPair,
+  validateEncryptingKeyPair
+} = require('jlinx-util')
+const Filemap = require('./filemap')
 
 module.exports = class Keystore {
   constructor (storagePath) {
-    this.storagePath = storagePath
-    this._ready = this._open()
+    debug(storagePath)
+    this._map = new Filemap(storagePath)
   }
 
   [Symbol.for('nodejs.util.inspect.custom')] (depth, opts) {
     let indent = ''
     if (typeof opts.indentationLvl === 'number') { while (indent.length < opts.indentationLvl) indent += ' ' }
     return this.constructor.name + '(\n' +
-      indent + '  storagePath: ' + opts.stylize(this.storagePath, 'string') + '\n' +
+      indent + '  storagePath: ' + opts.stylize(this._map.storagePath, 'string') + '\n' +
       indent + ')'
   }
 
-  async _open () {
-    debug('opening', this.storagePath)
-    await fs.mkdir(this.storagePath).catch(safetyCatch)
+  ready () { return this._map.ready() }
+
+  async createSigning () {
+    const { publicKey, secretKey } = createSigningKeyPair()
+    const publicKeyAsString = keyToString(publicKey)
+    debug('created signing key', publicKeyAsString, publicKeyAsString.length)
+    debug('secretKey.byteLength', secretKey.byteLength)
+    await this._map.set(publicKeyAsString, secretKey)
+    return createSigningWrapper({ publicKeyAsString, publicKey, secretKey })
   }
 
-  _path (key) { return Path.join(this.storagePath, key) }
+  async createEncrypting () {
+    const { publicKey, secretKey } = createEncryptingKeyPair()
+    const publicKeyAsString = keyToString(publicKey)
+    debug('created encrypting key', publicKeyAsString, publicKeyAsString.length)
+    debug('secretKey.byteLength', secretKey.byteLength)
+    await this._map.set(publicKeyAsString, secretKey)
+    return createEncryptingWrapper({ publicKeyAsString, publicKey, secretKey })
+  }
 
-  async get (key) {
-    debug('get', key)
-    try {
-      return await fs.readFile(this._path(key))
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return
-      throw error
+  async get (publicKeyAsString) {
+    const secretKey = await this._map.get(publicKeyAsString)
+    if (!secretKey) return
+    debug('get', publicKeyAsString, secretKey.length)
+    const publicKey = keyToBuffer(publicKeyAsString)
+    if (secretKey.byteLength === 64) {
+      return createSigningWrapper({ publicKeyAsString, publicKey, secretKey })
+    }
+    if (secretKey.byteLength === 32) {
+      return createEncryptingWrapper({ publicKeyAsString, publicKey, secretKey })
     }
   }
 
-  async has (key) {
-    debug('has', key)
-    try {
-      await fs.stat(this._path(key))
-      return true
-    } catch (error) {
-      if (error.code === 'ENOENT') return false
-      throw error
-    }
+  has (publicKeyAsString) {
+    return this._map.has(publicKeyAsString)
   }
 
-  async put (key, value) {
-    debug('put', key)
-    await fs.writeFile(this._path(key), value)
-    return true
+  delete (publicKeyAsString) {
+    return this._map.delete(publicKeyAsString)
   }
+}
 
-  async delete (key) {
-    debug('delete', key)
-    try {
-      await fs.unlink(this._path(key))
-      return true
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return
-      throw error
-    }
+function createSigningWrapper ({ publicKeyAsString, publicKey, secretKey }) {
+  return {
+    publicKey: publicKeyAsString,
+    valid: () => validateSigningKeyPair({ publicKey, secretKey }),
+    sign: signable => sign(signable, secretKey),
+    verify: signable => sign(signable, secretKey)
+  }
+}
+
+function createEncryptingWrapper ({ publicKeyAsString, publicKey, secretKey }) {
+  return {
+    publicKey: publicKeyAsString,
+    valid: () => validateEncryptingKeyPair({ publicKey, secretKey }),
+    encrypt: encryptable => encrypt(encryptable, secretKey),
+    decrypt: encryptable => encrypt(encryptable, secretKey)
   }
 }
